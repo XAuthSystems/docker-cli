@@ -29,43 +29,41 @@ import (
 )
 
 func main() {
-	statusCode := dockerMain()
-	if statusCode != 0 {
-		os.Exit(statusCode)
+	err := dockerMain(context.Background())
+	if err != nil && !errdefs.IsCancelled(err) {
+		_, _ = fmt.Fprintln(os.Stderr, err)
+		os.Exit(getExitCode(err))
 	}
 }
 
-func dockerMain() int {
-	ctx, cancelNotify := signal.NotifyContext(context.Background(), platformsignals.TerminationSignals...)
+func dockerMain(ctx context.Context) error {
+	ctx, cancelNotify := signal.NotifyContext(ctx, platformsignals.TerminationSignals...)
 	defer cancelNotify()
 
 	dockerCli, err := command.NewDockerCli(command.WithBaseContext(ctx))
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
+		return err
 	}
 	logrus.SetOutput(dockerCli.Err())
 	otel.SetErrorHandler(debug.OTELErrorHandler)
 
-	if err := runDocker(ctx, dockerCli); err != nil {
-		if sterr, ok := err.(cli.StatusError); ok {
-			if sterr.Status != "" {
-				fmt.Fprintln(dockerCli.Err(), sterr.Status)
-			}
-			// StatusError should only be used for errors, and all errors should
-			// have a non-zero exit status, so never exit with 0
-			if sterr.StatusCode == 0 {
-				return 1
-			}
-			return sterr.StatusCode
-		}
-		if errdefs.IsCancelled(err) {
-			return 0
-		}
-		fmt.Fprintln(dockerCli.Err(), err)
-		return 1
+	return runDocker(ctx, dockerCli)
+}
+
+// getExitCode returns the exit-code to use for the given error.
+// If err is a [cli.StatusError] and has a StatusCode set, it uses the
+// status-code from it, otherwise it returns "1" for any error.
+func getExitCode(err error) int {
+	if err == nil {
+		return 0
 	}
-	return 0
+	var stErr cli.StatusError
+	if errors.As(err, &stErr) && stErr.StatusCode != 0 { // FIXME(thaJeztah): StatusCode should never be used with a zero status-code. Check if we do this anywhere.
+		return stErr.StatusCode
+	}
+
+	// No status-code provided; all errors should have a non-zero exit code.
+	return 1
 }
 
 func newDockerCommand(dockerCli *command.DockerCli) *cli.TopLevelCommand {
@@ -84,7 +82,7 @@ func newDockerCommand(dockerCli *command.DockerCli) *cli.TopLevelCommand {
 			if len(args) == 0 {
 				return command.ShowHelp(dockerCli.Err())(cmd, args)
 			}
-			return fmt.Errorf("docker: '%s' is not a docker command.\nSee 'docker --help'", args[0])
+			return fmt.Errorf("docker: unknown command: docker %s\n\nRun 'docker --help' for more information", args[0])
 		},
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			return isSupported(cmd, dockerCli)
@@ -102,7 +100,7 @@ func newDockerCommand(dockerCli *command.DockerCli) *cli.TopLevelCommand {
 	cmd.SetErr(dockerCli.Err())
 
 	opts, helpCmd = cli.SetupRootCommand(cmd)
-	_ = registerCompletionFuncForGlobalFlags(dockerCli.ContextStore(), cmd)
+	_ = registerCompletionFuncForGlobalFlags(dockerCli, cmd)
 	cmd.Flags().BoolP("version", "v", false, "Print version information and quit")
 	setFlagErrorFunc(dockerCli, cmd)
 

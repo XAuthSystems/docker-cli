@@ -10,7 +10,6 @@ import (
 	"github.com/docker/cli/cli/trust"
 	"github.com/docker/cli/internal/test"
 	notaryfake "github.com/docker/cli/internal/test/notary"
-	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/system"
 	"github.com/docker/docker/client"
@@ -33,8 +32,8 @@ func (c *fakeClient) Info(context.Context) (system.Info, error) {
 	return system.Info{}, nil
 }
 
-func (c *fakeClient) ImageInspectWithRaw(context.Context, string) (types.ImageInspect, []byte, error) {
-	return types.ImageInspect{}, []byte{}, nil
+func (c *fakeClient) ImageInspectWithRaw(context.Context, string) (image.InspectResponse, []byte, error) {
+	return image.InspectResponse{}, []byte{}, nil
 }
 
 func (c *fakeClient) ImagePush(context.Context, string, image.PushOptions) (io.ReadCloser, error) {
@@ -67,6 +66,7 @@ func TestTrustInspectPrettyCommandErrors(t *testing.T) {
 			test.NewFakeCli(&fakeClient{}))
 		cmd.SetArgs(tc.args)
 		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
 		cmd.Flags().Set("pretty", "true")
 		assert.ErrorContains(t, cmd.Execute(), tc.expectedError)
 	}
@@ -79,6 +79,7 @@ func TestTrustInspectPrettyCommandOfflineErrors(t *testing.T) {
 	cmd.Flags().Set("pretty", "true")
 	cmd.SetArgs([]string{"nonexistent-reg-name.io/image"})
 	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
 	assert.ErrorContains(t, cmd.Execute(), "no signatures or cannot access nonexistent-reg-name.io/image")
 
 	cli = test.NewFakeCli(&fakeClient{})
@@ -87,6 +88,7 @@ func TestTrustInspectPrettyCommandOfflineErrors(t *testing.T) {
 	cmd.Flags().Set("pretty", "true")
 	cmd.SetArgs([]string{"nonexistent-reg-name.io/image:tag"})
 	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
 	assert.ErrorContains(t, cmd.Execute(), "no signatures or cannot access nonexistent-reg-name.io/image")
 }
 
@@ -97,6 +99,7 @@ func TestTrustInspectPrettyCommandUninitializedErrors(t *testing.T) {
 	cmd.Flags().Set("pretty", "true")
 	cmd.SetArgs([]string{"reg/unsigned-img"})
 	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
 	assert.ErrorContains(t, cmd.Execute(), "no signatures or cannot access reg/unsigned-img")
 
 	cli = test.NewFakeCli(&fakeClient{})
@@ -105,6 +108,7 @@ func TestTrustInspectPrettyCommandUninitializedErrors(t *testing.T) {
 	cmd.Flags().Set("pretty", "true")
 	cmd.SetArgs([]string{"reg/unsigned-img:tag"})
 	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
 	assert.ErrorContains(t, cmd.Execute(), "no signatures or cannot access reg/unsigned-img:tag")
 }
 
@@ -115,6 +119,7 @@ func TestTrustInspectPrettyCommandEmptyNotaryRepoErrors(t *testing.T) {
 	cmd.Flags().Set("pretty", "true")
 	cmd.SetArgs([]string{"reg/img:unsigned-tag"})
 	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
 	assert.NilError(t, cmd.Execute())
 	assert.Check(t, is.Contains(cli.OutBuffer().String(), "No signatures for reg/img:unsigned-tag"))
 	assert.Check(t, is.Contains(cli.OutBuffer().String(), "Administrative keys for reg/img"))
@@ -125,6 +130,7 @@ func TestTrustInspectPrettyCommandEmptyNotaryRepoErrors(t *testing.T) {
 	cmd.Flags().Set("pretty", "true")
 	cmd.SetArgs([]string{"reg/img"})
 	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
 	assert.NilError(t, cmd.Execute())
 	assert.Check(t, is.Contains(cli.OutBuffer().String(), "No signatures for reg/img"))
 	assert.Check(t, is.Contains(cli.OutBuffer().String(), "Administrative keys for reg/img"))
@@ -187,7 +193,7 @@ func TestNotaryRoleToSigner(t *testing.T) {
 		}
 		assert.Check(t, is.Equal(role.String(), notaryRoleToSigner(role)))
 	}
-	assert.Check(t, is.Equal("notarole", notaryRoleToSigner(data.RoleName("notarole"))))
+	assert.Check(t, is.Equal("notarole", notaryRoleToSigner("notarole")))
 }
 
 // check if a role name is "released": either targets/releases or targets TUF roles
@@ -196,9 +202,9 @@ func TestIsReleasedTarget(t *testing.T) {
 	for _, role := range data.BaseRoles {
 		assert.Check(t, is.Equal(role == data.CanonicalTargetsRole, isReleasedTarget(role)))
 	}
-	assert.Check(t, !isReleasedTarget(data.RoleName("targets/not-releases")))
-	assert.Check(t, !isReleasedTarget(data.RoleName("random")))
-	assert.Check(t, !isReleasedTarget(data.RoleName("targets/releases/subrole")))
+	assert.Check(t, !isReleasedTarget("targets/not-releases"))
+	assert.Check(t, !isReleasedTarget("random"))
+	assert.Check(t, !isReleasedTarget("targets/releases/subrole"))
 }
 
 // creates a mock delegation with a given name and no keys

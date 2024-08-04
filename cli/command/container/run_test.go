@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"net"
-	"os/signal"
 	"syscall"
 	"testing"
 	"time"
@@ -38,15 +37,85 @@ func TestRunLabel(t *testing.T) {
 	assert.NilError(t, cmd.Execute())
 }
 
-func TestRunAttachTermination(t *testing.T) {
+func TestRunAttach(t *testing.T) {
 	p, tty, err := pty.Open()
 	assert.NilError(t, err)
-
 	defer func() {
 		_ = tty.Close()
 		_ = p.Close()
 	}()
 
+	var conn net.Conn
+	attachCh := make(chan struct{})
+	fakeCLI := test.NewFakeCli(&fakeClient{
+		createContainerFunc: func(_ *container.Config, _ *container.HostConfig, _ *network.NetworkingConfig, _ *specs.Platform, _ string) (container.CreateResponse, error) {
+			return container.CreateResponse{
+				ID: "id",
+			}, nil
+		},
+		containerAttachFunc: func(ctx context.Context, containerID string, options container.AttachOptions) (types.HijackedResponse, error) {
+			server, client := net.Pipe()
+			conn = server
+			t.Cleanup(func() {
+				_ = server.Close()
+			})
+			attachCh <- struct{}{}
+			return types.NewHijackedResponse(client, types.MediaTypeRawStream), nil
+		},
+		waitFunc: func(_ string) (<-chan container.WaitResponse, <-chan error) {
+			responseChan := make(chan container.WaitResponse, 1)
+			errChan := make(chan error)
+
+			responseChan <- container.WaitResponse{
+				StatusCode: 33,
+			}
+			return responseChan, errChan
+		},
+		// use new (non-legacy) wait API
+		// see: 38591f20d07795aaef45d400df89ca12f29c603b
+		Version: "1.30",
+	}, func(fc *test.FakeCli) {
+		fc.SetOut(streams.NewOut(tty))
+		fc.SetIn(streams.NewIn(tty))
+	})
+
+	cmd := NewRunCommand(fakeCLI)
+	cmd.SetArgs([]string{"-it", "busybox"})
+	cmd.SilenceUsage = true
+	cmdErrC := make(chan error, 1)
+	go func() {
+		cmdErrC <- cmd.Execute()
+	}()
+
+	// run command should attempt to attach to the container
+	select {
+	case <-time.After(5 * time.Second):
+		t.Fatal("containerAttachFunc was not called before the 5 second timeout")
+	case <-attachCh:
+	}
+
+	// end stream from "container" so that we'll detach
+	conn.Close()
+
+	select {
+	case cmdErr := <-cmdErrC:
+		assert.Equal(t, cmdErr, cli.StatusError{
+			StatusCode: 33,
+		})
+	case <-time.After(2 * time.Second):
+		t.Fatal("cmd did not return within timeout")
+	}
+}
+
+func TestRunAttachTermination(t *testing.T) {
+	p, tty, err := pty.Open()
+	assert.NilError(t, err)
+	defer func() {
+		_ = tty.Close()
+		_ = p.Close()
+	}()
+
+	var conn net.Conn
 	killCh := make(chan struct{})
 	attachCh := make(chan struct{})
 	fakeCLI := test.NewFakeCli(&fakeClient{
@@ -61,42 +130,62 @@ func TestRunAttachTermination(t *testing.T) {
 		},
 		containerAttachFunc: func(ctx context.Context, containerID string, options container.AttachOptions) (types.HijackedResponse, error) {
 			server, client := net.Pipe()
+			conn = server
 			t.Cleanup(func() {
 				_ = server.Close()
 			})
 			attachCh <- struct{}{}
 			return types.NewHijackedResponse(client, types.MediaTypeRawStream), nil
 		},
-		Version: "1.36",
+		waitFunc: func(_ string) (<-chan container.WaitResponse, <-chan error) {
+			responseChan := make(chan container.WaitResponse, 1)
+			errChan := make(chan error)
+
+			responseChan <- container.WaitResponse{
+				StatusCode: 130,
+			}
+			return responseChan, errChan
+		},
+		// use new (non-legacy) wait API
+		// see: 38591f20d07795aaef45d400df89ca12f29c603b
+		Version: "1.30",
 	}, func(fc *test.FakeCli) {
 		fc.SetOut(streams.NewOut(tty))
 		fc.SetIn(streams.NewIn(tty))
 	})
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM)
-	defer cancel()
-
-	assert.Equal(t, fakeCLI.In().IsTerminal(), true)
-	assert.Equal(t, fakeCLI.Out().IsTerminal(), true)
 
 	cmd := NewRunCommand(fakeCLI)
 	cmd.SetArgs([]string{"-it", "busybox"})
 	cmd.SilenceUsage = true
+	cmdErrC := make(chan error, 1)
 	go func() {
-		assert.ErrorIs(t, cmd.ExecuteContext(ctx), context.Canceled)
+		cmdErrC <- cmd.Execute()
 	}()
 
+	// run command should attempt to attach to the container
 	select {
 	case <-time.After(5 * time.Second):
-		t.Fatal("containerAttachFunc was not called before the 5 second timeout")
+		t.Fatal("containerAttachFunc was not called before the timeout")
 	case <-attachCh:
 	}
 
-	assert.NilError(t, syscall.Kill(syscall.Getpid(), syscall.SIGTERM))
+	assert.NilError(t, syscall.Kill(syscall.Getpid(), syscall.SIGINT))
+	// end stream from "container" so that we'll detach
+	conn.Close()
+
 	select {
-	case <-time.After(5 * time.Second):
-		cancel()
-		t.Fatal("containerKillFunc was not called before the 5 second timeout")
 	case <-killCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("containerKillFunc was not called before the timeout")
+	}
+
+	select {
+	case cmdErr := <-cmdErrC:
+		assert.Equal(t, cmdErr, cli.StatusError{
+			StatusCode: 130,
+		})
+	case <-time.After(2 * time.Second):
+		t.Fatal("cmd did not return before the timeout")
 	}
 }
 
@@ -127,23 +216,29 @@ func TestRunCommandWithContentTrustErrors(t *testing.T) {
 		},
 	}
 	for _, tc := range testCases {
-		fakeCLI := test.NewFakeCli(&fakeClient{
-			createContainerFunc: func(config *container.Config,
-				hostConfig *container.HostConfig,
-				networkingConfig *network.NetworkingConfig,
-				platform *specs.Platform,
-				containerName string,
-			) (container.CreateResponse, error) {
-				return container.CreateResponse{}, errors.New("shouldn't try to pull image")
-			},
-		}, test.EnableContentTrust)
-		fakeCLI.SetNotaryClient(tc.notaryFunc)
-		cmd := NewRunCommand(fakeCLI)
-		cmd.SetArgs(tc.args)
-		cmd.SetOut(io.Discard)
-		err := cmd.Execute()
-		assert.Assert(t, err != nil)
-		assert.Assert(t, is.Contains(fakeCLI.ErrBuffer().String(), tc.expectedError))
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			fakeCLI := test.NewFakeCli(&fakeClient{
+				createContainerFunc: func(config *container.Config,
+					hostConfig *container.HostConfig,
+					networkingConfig *network.NetworkingConfig,
+					platform *specs.Platform,
+					containerName string,
+				) (container.CreateResponse, error) {
+					return container.CreateResponse{}, errors.New("shouldn't try to pull image")
+				},
+			}, test.EnableContentTrust)
+			fakeCLI.SetNotaryClient(tc.notaryFunc)
+			cmd := NewRunCommand(fakeCLI)
+			cmd.SetArgs(tc.args)
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			err := cmd.Execute()
+			statusErr := cli.StatusError{}
+			assert.Check(t, errors.As(err, &statusErr))
+			assert.Check(t, is.Equal(statusErr.StatusCode, 125))
+			assert.Check(t, is.ErrorContains(err, tc.expectedError))
+		})
 	}
 }
 
@@ -175,8 +270,8 @@ func TestRunContainerImagePullPolicyInvalid(t *testing.T) {
 
 			statusErr := cli.StatusError{}
 			assert.Check(t, errors.As(err, &statusErr))
-			assert.Equal(t, statusErr.StatusCode, 125)
-			assert.Check(t, is.Contains(dockerCli.ErrBuffer().String(), tc.ExpectedErrMsg))
+			assert.Check(t, is.Equal(statusErr.StatusCode, 125))
+			assert.Check(t, is.ErrorContains(err, tc.ExpectedErrMsg))
 		})
 	}
 }

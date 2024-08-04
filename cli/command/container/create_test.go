@@ -189,8 +189,8 @@ func TestCreateContainerImagePullPolicyInvalid(t *testing.T) {
 
 			statusErr := cli.StatusError{}
 			assert.Check(t, errors.As(err, &statusErr))
-			assert.Equal(t, statusErr.StatusCode, 125)
-			assert.Check(t, is.Contains(dockerCli.ErrBuffer().String(), tc.ExpectedErrMsg))
+			assert.Check(t, is.Equal(statusErr.StatusCode, 125))
+			assert.Check(t, is.ErrorContains(err, tc.ExpectedErrMsg))
 		})
 	}
 }
@@ -236,6 +236,7 @@ func TestNewCreateCommandWithContentTrustErrors(t *testing.T) {
 		fakeCLI.SetNotaryClient(tc.notaryFunc)
 		cmd := NewCreateCommand(fakeCLI)
 		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
 		cmd.SetArgs(tc.args)
 		err := cmd.Execute()
 		assert.ErrorContains(t, err, tc.expectedError)
@@ -284,7 +285,7 @@ func TestNewCreateCommandWithWarnings(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			cli := test.NewFakeCli(&fakeClient{
+			fakeCLI := test.NewFakeCli(&fakeClient{
 				createContainerFunc: func(config *container.Config,
 					hostConfig *container.HostConfig,
 					networkingConfig *network.NetworkingConfig,
@@ -294,15 +295,15 @@ func TestNewCreateCommandWithWarnings(t *testing.T) {
 					return container.CreateResponse{}, nil
 				},
 			})
-			cmd := NewCreateCommand(cli)
+			cmd := NewCreateCommand(fakeCLI)
 			cmd.SetOut(io.Discard)
 			cmd.SetArgs(tc.args)
 			err := cmd.Execute()
 			assert.NilError(t, err)
 			if tc.warning {
-				golden.Assert(t, cli.ErrBuffer().String(), tc.name+".golden")
+				golden.Assert(t, fakeCLI.ErrBuffer().String(), tc.name+".golden")
 			} else {
-				assert.Equal(t, cli.ErrBuffer().String(), "")
+				assert.Equal(t, fakeCLI.ErrBuffer().String(), "")
 			}
 		})
 	}

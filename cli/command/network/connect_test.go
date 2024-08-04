@@ -19,7 +19,7 @@ func TestNetworkConnectErrors(t *testing.T) {
 		expectedError      string
 	}{
 		{
-			expectedError: "requires exactly 2 arguments",
+			expectedError: "requires 2 arguments",
 		},
 		{
 			args: []string{"toto", "titi"},
@@ -38,6 +38,7 @@ func TestNetworkConnectErrors(t *testing.T) {
 		)
 		cmd.SetArgs(tc.args)
 		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
 		assert.ErrorContains(t, cmd.Execute(), tc.expectedError)
 	}
 }

@@ -90,7 +90,7 @@ func TestNetworkRemoveForce(t *testing.T) {
 				assert.NilError(t, err)
 			} else {
 				assert.Check(t, is.Contains(fakeCli.ErrBuffer().String(), tc.expectedErr))
-				assert.ErrorContains(t, err, "Code: 1")
+				assert.ErrorContains(t, err, "exit status 1")
 			}
 		})
 	}
@@ -114,5 +114,7 @@ func TestNetworkRemovePromptTermination(t *testing.T) {
 	})
 	cmd := newRemoveCommand(cli)
 	cmd.SetArgs([]string{"existing-network"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
 	test.TerminatePrompt(ctx, t, cmd, cli)
 }

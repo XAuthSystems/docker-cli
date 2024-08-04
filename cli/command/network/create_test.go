@@ -21,7 +21,7 @@ func TestNetworkCreateErrors(t *testing.T) {
 		expectedError     string
 	}{
 		{
-			expectedError: "exactly 1 argument",
+			expectedError: "1 argument",
 		},
 		{
 			args: []string{"toto"},
@@ -137,6 +137,7 @@ func TestNetworkCreateErrors(t *testing.T) {
 			assert.NilError(t, cmd.Flags().Set(key, value))
 		}
 		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
 		assert.ErrorContains(t, cmd.Execute(), tc.expectedError)
 	}
 }

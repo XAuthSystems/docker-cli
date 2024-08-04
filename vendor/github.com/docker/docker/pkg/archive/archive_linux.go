@@ -6,20 +6,17 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/containerd/containerd/pkg/userns"
 	"github.com/docker/docker/pkg/system"
+	"github.com/moby/sys/user/userns"
 	"github.com/pkg/errors"
 	"golang.org/x/sys/unix"
 )
 
-func getWhiteoutConverter(format WhiteoutFormat, inUserNS bool) (tarWhiteoutConverter, error) {
+func getWhiteoutConverter(format WhiteoutFormat) tarWhiteoutConverter {
 	if format == OverlayWhiteoutFormat {
-		if inUserNS {
-			return nil, errors.New("specifying OverlayWhiteoutFormat is not allowed in userns")
-		}
-		return overlayWhiteoutConverter{}, nil
+		return overlayWhiteoutConverter{}
 	}
-	return nil, nil
+	return nil
 }
 
 type overlayWhiteoutConverter struct{}

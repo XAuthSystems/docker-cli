@@ -31,7 +31,7 @@ func TestManifestPushErrors(t *testing.T) {
 	}{
 		{
 			args:          []string{"one-arg", "extra-arg"},
-			expectedError: "requires exactly 1 argument",
+			expectedError: "requires 1 argument",
 		},
 		{
 			args:          []string{"th!si'sa/fa!ke/li$t/-name"},
@@ -44,6 +44,7 @@ func TestManifestPushErrors(t *testing.T) {
 		cmd := newPushListCommand(cli)
 		cmd.SetArgs(tc.args)
 		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
 		assert.ErrorContains(t, cmd.Execute(), tc.expectedError)
 	}
 }

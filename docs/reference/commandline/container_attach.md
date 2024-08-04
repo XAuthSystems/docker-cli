@@ -12,7 +12,7 @@ Attach local standard input, output, and error streams to a running container
 | Name                            | Type     | Default | Description                                         |
 |:--------------------------------|:---------|:--------|:----------------------------------------------------|
 | [`--detach-keys`](#detach-keys) | `string` |         | Override the key sequence for detaching a container |
-| `--no-stdin`                    |          |         | Do not attach STDIN                                 |
+| `--no-stdin`                    | `bool`   |         | Do not attach STDIN                                 |
 | `--sig-proxy`                   | `bool`   | `true`  | Proxy all received signals to the process           |
 
 
@@ -97,7 +97,7 @@ CONTAINER ID   IMAGE     COMMAND    CREATED          STATUS                     
 Repeating the example above, but this time with the `-i` and `-t` options set;
 
 ```console
-$ docker run -dit --name topdemo2 ubuntu:22.04 /usr/bin/top -b
+$ docker run -dit --name topdemo2 alpine /usr/bin/top -b
 ```
 
 Now, when attaching to the container, and pressing the `CTRL-p CTRL-q` ("read
@@ -164,4 +164,4 @@ the following:
 
 These `a`, `ctrl-a`, `X`, or `ctrl-\\` values are all examples of valid key
 sequences. To configure a different configuration default key sequence for all
-containers, see [**Configuration file** section](https://docs.docker.com/engine/reference/commandline/cli/#configuration-files).
+containers, see [**Configuration file** section](https://docs.docker.com/reference/cli/docker/#configuration-files).
